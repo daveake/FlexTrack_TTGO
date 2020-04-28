@@ -12,6 +12,12 @@ To build FlexTrack for use with a HABDuino or other tracker using I2C communicat
 
 [https://github.com/rambo/I2C](https://github.com/rambo/I2C) 
 
+In addition, for the TTGO T-Beam the AXP202X Library is required:
+
+[https://github.com/lewisxhe/AXP202X_Library](https://github.com/lewisxhe/AXP202X_Library)
+
+Libraries can be added via the Ardunio IDE menu:  Sketch -> Include Library -> Add .zip Library
+
 ## Disclaimer
 
 The FlexTrack code is provided as is with no guarantees of performance or operation. 

@@ -203,6 +203,10 @@ void ProcessNMEA(char *Buffer, int Count)
     {
       DisableNMEAProtocol(5);
     }
+    else if (strncmp((char *)Buffer+3, "RMC", 3) == 0)
+    {
+      DisableNMEAProtocol(4);
+    }
   }
   else
   {

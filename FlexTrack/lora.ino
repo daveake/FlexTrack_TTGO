@@ -170,9 +170,13 @@ void setupRFM98(double Frequency, int Mode)
   
   // initialize the pins
   #ifdef LORA_RESET
+    Serial.println("Resetting LoRa Module ...");
     pinMode(LORA_RESET, OUTPUT);
+    digitalWrite(LORA_RESET, LOW);
+    delay(10);
     digitalWrite(LORA_RESET, HIGH);
-    delay(10);          // Module needs this before it's ready
+    delay(1000);          // Module needs this before it's ready on these boards (slow power up ?)
+    Serial.println("Reset LoRa Module");
   #endif
   pinMode(LORA_NSS, OUTPUT);
   pinMode(LORA_DIO0, INPUT);
@@ -280,7 +284,7 @@ void setMode(byte newMode)
   if(newMode == currentMode)
     return;  
   
-  Serial.printf("Set LoRa Mode %d\n", newMode);
+  // Serial.printf("Set LoRa Mode %d\n", newMode);
   
   switch (newMode) 
   {
@@ -512,7 +516,7 @@ void SendLoRaPacket(unsigned char *buffer, int Length)
     InRTTYMode = 0;
   }
   
-  Serial.print("Sending "); Serial.print(Length);Serial.println(" bytes");
+  // Serial.print("Sending "); Serial.print(Length);Serial.println(" bytes");
   
   setMode(RF98_MODE_STANDBY);
 
@@ -853,6 +857,7 @@ void CheckLoRa(void)
           {
             PacketLength = BuildSentence((char *)Sentence, LORA_PAYLOAD_ID);
   	        Serial.println(F("LoRa: Tx ASCII Sentence"));
+            Serial.print((char *)Sentence);
   		    }
         }
   							

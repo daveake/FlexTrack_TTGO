@@ -172,16 +172,53 @@ void ProcessNMEA(char *Buffer, int Count)
         GPS.Seconds = atoi(Temp);
         GPS.SecondsInDay = (unsigned long)GPS.Hours * 3600L + (unsigned long)GPS.Minutes * 60L + (unsigned long)GPS.Seconds;
 
-        if (Satellites >= 4)
+        if (GPS.UseHostPosition)
+        {
+          GPS.UseHostPosition--;
+        }
+        else if (Satellites >= 4)
         {
           GPS.Latitude = FixPosition(atof(LatString));
           if (ns == 'S') GPS.Latitude = -GPS.Latitude;
           GPS.Longitude = FixPosition(atof(LongString));
           if (ew == 'W') GPS.Longitude = -GPS.Longitude;
+          GPS.PreviousAltitude = GPS.Altitude;
           GPS.Altitude = (unsigned int)atof(Altitude);
+          GPS.AscentRate = GPS.AscentRate * 0.7 + (GPS.Altitude - GPS.PreviousAltitude) * 0.3;
         }
         
         GPS.Satellites = Satellites;
+
+        if (GPS.Altitude > GPS.MaximumAltitude)
+        {
+          GPS.MaximumAltitude = GPS.Altitude;
+        }
+        
+        if ((GPS.Altitude < GPS.MinimumAltitude) || (GPS.MinimumAltitude == 0))
+        {
+          GPS.MinimumAltitude = GPS.Altitude;           
+        }
+
+        // Launched?
+        if ((GPS.AscentRate >= 1.0) && (GPS.Altitude > (GPS.MinimumAltitude+150)) && (GPS.FlightMode == fmIdle))
+        {
+          GPS.FlightMode = fmLaunched;
+          Serial.printf("*** LAUNCHED ***\n");
+        }
+
+        // Burst?
+        if ((GPS.AscentRate < -10.0) && (GPS.Altitude < (GPS.MaximumAltitude+50)) && (GPS.MaximumAltitude >= (GPS.MinimumAltitude+2000)) && (GPS.FlightMode == fmLaunched))
+        {
+          GPS.FlightMode = fmDescending;
+          Serial.printf("*** DESCENDING ***\n");
+        }
+        
+        // Landed?
+        if ((GPS.AscentRate >= -0.1) && (GPS.Altitude <= LANDING_ALTITUDE+2000) && (GPS.FlightMode >= fmDescending) && (GPS.FlightMode < fmLanded))
+        {
+          GPS.FlightMode = fmLanded;
+          Serial.printf("*** LANDED ***\n");
+        }        
       }
       
       Serial.print(GPS.Hours); Serial.print(":"); Serial.print(GPS.Minutes); Serial.print(":"); Serial.print(GPS.Seconds);Serial.print(" - ");
@@ -252,10 +289,12 @@ void CheckGPS(void)
   if (millis() >= ModeTime)
   {
     RequiredFlightMode = (GPS.Altitude > 1000) ? 6 : 3;    // 6 is airborne <1g mode; 3=Pedestrian mode
-    if (RequiredFlightMode != GPS.FlightMode)
+    if (RequiredFlightMode != GPS.GPSFlightMode)
     {
-      // SetFlightMode(RequiredFlightMode);
-      // Serial.println("Setting flight mode\n");
+      GPS.GPSFlightMode = RequiredFlightMode;
+
+      SetFlightMode(RequiredFlightMode);
+      Serial.println("Setting flight mode\n");
     }
     
     ModeTime = millis() + 60000;

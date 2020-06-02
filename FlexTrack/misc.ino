@@ -22,18 +22,6 @@ int BuildSentence(char *TxLine, const char *PayloadID)
             EXTRA_FIELD_LIST 
             );
             
-    /*
-            "$$%s,%d,%02d:%02d:%02d,%s,%s,%05.5u,%d,%d,%d",
-            PAYLOAD_ID,
-            SentenceCounter,
-	    GPS.Hours, GPS.Minutes, GPS.Seconds,
-            LatitudeString,
-            LongitudeString,
-            GPS.Altitude,
-            (int)((GPS.Speed * 13) / 7),
-            GPS.Direction,
-            GPS.Satellites);
-    */
 
     Count = strlen(TxLine);
 

@@ -42,12 +42,16 @@ s|                                                                              
 
 #define LORA_ID              0
 #define LORA_CYCLETIME       0                // Set to zero to send continuously
-#define LORA_MODE            2
+#define LORA_MODE            1
 #define LORA_BINARY          0
 #define LORA_CALL_FREQ 		433.650
 #define LORA_CALL_MODE		 5				
-#define LORA_CALL_COUNT		 10				// Set to zero to disable calling mode
+#define LORA_CALL_COUNT		 0				// Set to zero to disable calling mode
 
+// Landing prediction
+#define INITIAL_CDA         0.7
+#define PAYLOAD_WEIGHT      1.0
+#define LANDING_ALTITUDE    100
 
 // Cutdown settings
 // #define CUTDOWN             A2
@@ -69,32 +73,13 @@ s|                                                                              
 //------------------------------------------------------------------------------------------------------
 
 
-#ifndef DEBUG_SERIAL
-  #define DEBUG_SERIAL Serial
-#endif
-
-#define EXTRA_FIELD_FORMAT    ",%d,%d,%d"          // List of formats for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
-#define EXTRA_FIELD_LIST           ,(int)((GPS.Speed * 13) / 7), GPS.Direction, GPS.Satellites
-
-// #define EXTRA_FIELD_FORMAT      ",%d,%d,%d,%d,%d,%d"          // List of formats for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
-// #define EXTRA_FIELD_LIST            ,(int)((GPS.Speed * 13) / 7), GPS.Direction, GPS.Satellites, DS18B20_Temperatures[0], Channel0Average, GPS.CutdownStatus
+#define EXTRA_FIELD_FORMAT    ",%d,%.2f,%7.5f,%7.5f,%3.1f,%d"          // List of formats for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
+#define EXTRA_FIELD_LIST           ,GPS.Satellites, GPS.CDA, GPS.PredictedLatitude, GPS.PredictedLongitude, GPS.PredictedLandingSpeed, GPS.TimeTillLanding
+                                                                
                                                                 // List of variables/expressions for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
 #define SENTENCE_LENGTH      100                  // This is more than sufficient for the standard sentence.  Extend if needed; shorten if you are tight on memory.
 
 AXP20X_Class axp;
-
-    /*
-            "$%s,%d,%02d:%02d:%02d,%s,%s,%05.5u,%d,%d,%d",
-            PAYLOAD_ID,
-            SentenceCounter,
-	    GPS.Hours, GPS.Minutes, GPS.Seconds,
-            LatitudeString,
-            LongitudeString,
-            GPS.Altitude,
-            (int)((GPS.Speed * 13) / 7),
-            GPS.Direction,
-            GPS.Satellites);
-    */
 
 
 //------------------------------------------------------------------------------------------------------
@@ -111,27 +96,35 @@ struct TBinaryPacket
 	int32_t  	Altitude;
 };  //  __attribute__ ((packed));
 
+typedef enum {fmIdle, fmLaunched, fmDescending, fmLanding, fmLanded} TFlightMode;
+
 struct TGPS
 {
   int Hours, Minutes, Seconds;
   unsigned long SecondsInDay;					// Time in seconds since midnight
   float Longitude, Latitude;
-  long Altitude;
+  long Altitude, MinimumAltitude, MaximumAltitude, PreviousAltitude;
   unsigned int Satellites;
-  int Speed;
-  int Direction;
   byte FixType;
   byte psm_status;
   float InternalTemperature;
   float BatteryVoltage;
   float ExternalTemperature;
   float Pressure;
+  float AscentRate;
   unsigned int BoardCurrent;
   unsigned int errorstatus;
-  byte FlightMode;
+  byte GPSFlightMode;
+  TFlightMode FlightMode;
   byte PowerMode;
   int CutdownStatus;
-} GPS;
+  float PredictedLatitude;
+  float PredictedLongitude;
+  float CDA;
+  int UseHostPosition;
+  int TimeTillLanding;
+  float PredictedLandingSpeed;
+ } GPS;
 
 
 int SentenceCounter=0;
@@ -142,31 +135,14 @@ void setup()
 {
   // Serial port(s)
   
-  #ifdef GPS_SERIAL
-    GPS_SERIAL.begin(9600);
-  #endif
-  
-  #ifdef DEBUG_SERIAL
-    DEBUG_SERIAL.begin(9600);
-    Serial.println("");
-    Serial.print("FlexTrack Flight Computer, payload ID(s)");
-    #ifdef LORA_NSS
-      Serial.print(' ');
-      Serial.print(LORA_PAYLOAD_ID);
-    #endif  
+  Serial.begin(38400);
+  Serial.println("");
+  Serial.print("FlexTrack Flight Computer, payload ID(s)");
+  Serial.print(' ');
+  Serial.print(LORA_PAYLOAD_ID);
       
-    Serial.println("");
-    Serial.println("");
-  #endif
-
-  Serial.println(F("Serial GPS"));
-
-#ifdef LORA_NSS
-  Serial.println(F("LoRa telemetry enabled"));
-#endif
-
-  // SetupLEDs();
-  
+  Serial.println("");
+   
 #ifdef CUTDOWN
   SetupCutdown();
 #endif
@@ -204,6 +180,8 @@ void setup()
 #ifdef WIREBUS
   // Setupds18b20();
 #endif
+
+  SetupPrediction();
 }
 
 
@@ -224,4 +202,91 @@ void loop()
 #ifdef WIREBUS
   Checkds18b20();
 #endif
+
+  CheckHost();
+
+  CheckPrediction();
+}
+
+void CheckHost(void)
+{
+  static char Line[80];
+  static unsigned int Length=0;
+  char Character;
+
+  while (Serial.available())
+  { 
+    Character = Serial.read();
+
+    if (Character == '~')
+    {
+      Line[0] = Character;
+      Length = 1;
+    }
+    else if (Character == '\r')
+    {
+      Line[Length] = '\0';
+      ProcessCommand(Line+1);
+      Length = 0;
+    }
+    else if (Length >= sizeof(Line))
+    {
+      Length = 0;
+    }
+    else if (Length > 0)
+    {
+      Line[Length++] = Character;
+    }
+  }
+}
+
+void ProcessCommand(char *Line)
+{
+  int OK = 0;
+
+  if (Line[0] == 'G')
+  {
+    // OK = ProcessGPSCommand(Line+1);
+  }
+  else if (Line[0] == 'C')
+  {
+    // OK = ProcessCommonCommand(Line+1);
+  }
+  else if (Line[0] == 'L')
+  {
+    // OK = ProcessLORACommand(Line+1);
+  }
+  else if (Line[0] == 'A')
+  {
+    // OK = ProcessAPRSCommand(Line+1);
+  }
+  else if (Line[0] == 'F')
+  {
+    OK = ProcessFieldCommand(Line+1);
+  }
+
+  if (OK)
+  {
+    Serial.println("*");
+  }
+  else
+  {
+    Serial.println("?");
+  }
+}
+
+int ProcessFieldCommand(char *Line)
+{
+  int OK = 0;
+
+  if (Line[0] == 'P')
+  {
+    GPS.PreviousAltitude = GPS.Altitude;
+    sscanf(Line+1,"%f,%f,%ld", &GPS.Latitude, &GPS.Longitude, &GPS.Altitude);
+    GPS.UseHostPosition = 5;
+    GPS.AscentRate = GPS.AscentRate * 0.7 + (GPS.Altitude - GPS.PreviousAltitude) * 0.3;
+   OK = 1;
+  }
+  
+  return OK;
 }

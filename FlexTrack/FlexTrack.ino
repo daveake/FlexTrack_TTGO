@@ -26,7 +26,7 @@ s|                                                                              
 #define LORA_REPEAT_SLOT_1   -1
 #define LORA_REPEAT_SLOT_2   -1
 
-#define LORA_RTTY_FREQ    434.400               // For devices that are frequency-agile
+#define LORA_RTTY_FREQ    434.450               // For devices that are frequency-agile
 #define LORA_RTTY_BAUD       300
 #define LORA_RTTY_SHIFT      488
 #define LORA_RTTY_COUNT       0           // n RTTY packets.  Set to 0 to disable
@@ -37,7 +37,7 @@ s|                                                                              
 #define LORA_TIME_MUTLIPLER  2
 #define LORA_TIME_OFFSET     1
 #define LORA_PACKET_TIME    500
-#define LORA_FREQUENCY       434.450
+#define LORA_FREQUENCY       434.454
 #define LORA_OFFSET           0         // Frequency to add in kHz to make Tx frequency accurate
 
 #define LORA_ID              0
@@ -45,7 +45,7 @@ s|                                                                              
 #define LORA_MODE            1
 #define LORA_BINARY          0
 #define LORA_CALL_FREQ 		433.650
-#define LORA_CALL_MODE		 5				
+#define LORA_CALL_MODE		 0				
 #define LORA_CALL_COUNT		 0				// Set to zero to disable calling mode
 
 // Landing prediction
@@ -53,9 +53,16 @@ s|                                                                              
 #define PAYLOAD_WEIGHT      1.0
 #define LANDING_ALTITUDE    100
 
+// Optional devices - uncomment if present
+//#define BMP085
+
 // Cutdown settings
 // #define CUTDOWN             A2
 
+
+#ifdef BMP085
+#include <Adafruit_BMP085.h>
+#endif
 
 //------------------------------------------------------------------------------------------------------
 
@@ -72,11 +79,16 @@ s|                                                                              
 
 //------------------------------------------------------------------------------------------------------
 
+// List of variables/expressions for extra fields. Make empty if no such fields.
 
+#ifdef BMP085
+#define EXTRA_FIELD_FORMAT    ",%d,%.1f,%.0f,%.2f,%7.5f,%7.5f,%3.1f,%d"          // List of formats for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
+#define EXTRA_FIELD_LIST           ,GPS.Satellites, GPS.ExternalTemperature, GPS.Pressure, GPS.CDA, GPS.PredictedLatitude, GPS.PredictedLongitude, GPS.PredictedLandingSpeed, GPS.TimeTillLanding
+#else
 #define EXTRA_FIELD_FORMAT    ",%d,%.2f,%7.5f,%7.5f,%3.1f,%d"          // List of formats for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
 #define EXTRA_FIELD_LIST           ,GPS.Satellites, GPS.CDA, GPS.PredictedLatitude, GPS.PredictedLongitude, GPS.PredictedLandingSpeed, GPS.TimeTillLanding
-                                                                
-                                                                // List of variables/expressions for extra fields. Make empty if no such fields.  Always use comma at start of there are any such fields.
+#endif
+
 #define SENTENCE_LENGTH      100                  // This is more than sufficient for the standard sentence.  Extend if needed; shorten if you are tight on memory.
 
 AXP20X_Class axp;
@@ -181,6 +193,10 @@ void setup()
   // Setupds18b20();
 #endif
 
+#ifdef BMP085
+  SetupBMP085();
+#endif
+
   SetupPrediction();
 }
 
@@ -201,6 +217,10 @@ void loop()
 
 #ifdef WIREBUS
   Checkds18b20();
+#endif
+
+#ifdef BMP085
+  CheckBMP085();
 #endif
 
   CheckHost();

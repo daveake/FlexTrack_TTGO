@@ -415,7 +415,7 @@ int TimeToSend(void)
 	
   SendRepeatedPacket = 0;
 
-  if (LORA_CYCLETIME == 0)
+  if (LORA_CYCLETIME <= 0)
   {
     // Not using time to decide when we can send
     return 1;

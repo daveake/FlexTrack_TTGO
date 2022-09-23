@@ -1,23 +1,11 @@
-/*---------------------------------------------------*\
+/*----------------------------------------------------\
 |                                                     |
 | LoRa radio code, for downlink, uplink and repeating |
 |                                                     |
 | Messages can be timed using a GPS reference, to     |
 | comply with the TDMA timing requirements.           |
-|                                                     |
-| Connections:                                        |
-|                                                     |
-|               Arduino  X - RFM98W DIO5              |
-|               Arduino  X - RFM98W DIO0              |
-|                                                     |
-|               Arduino  X  - RFM98W NSS              |
-|               Arduino 11 - RFM98W MOSI              |
-|               Arduino 12 - RFM98W MISO              |
-|               Arduino 13 - RFM98W CLK               |
-|                                                     |
+|                                                     |                                                     |
 \*---------------------------------------------------*/
-
-#ifdef LORA_NSS
 
 #include <SPI.h>
 #include <string.h>
@@ -42,6 +30,9 @@
 #define REG_FREQ_ERROR              0x28
 #define REG_DETECT_OPT              0x31
 #define	REG_DETECTION_THRESHOLD     0x37
+#define REG_PACKET_SNR              0x19
+#define REG_PACKET_RSSI             0x1A
+#define REG_CURRENT_RSSI            0x1B
 #define REG_DIO_MAPPING_1           0x40
 #define REG_DIO_MAPPING_2           0x41
 
@@ -143,9 +134,15 @@ int FSKBitRate, FSKOverSample, RTTYBitLength;
 
 void SetupLoRa(void)
 {
-  setupRFM98(LORA_FREQUENCY, LORA_MODE);
+  pinMode(LORA_NSS, OUTPUT);
+  pinMode(LORA_DIO0, INPUT);
 
-  if (LORA_RTTY_BAUD == 50)
+  // SPI.begin();
+  SPI.begin(SCK,MISO,MOSI,LORA_NSS);
+
+  setupRFM98(Settings.LoRaFrequency, Settings.LoRaMode);
+
+  if (Settings.RTTYBaudRate == 50)
   {
     FSKBitRate = 40000;
     FSKOverSample = 2;
@@ -167,23 +164,7 @@ void setupRFM98(double Frequency, int Mode)
   int SpreadingFactor;
   int LowDataRateOptimize;
   int PayloadLength;
-  
-  // initialize the pins
-  #ifdef LORA_RESET
-    Serial.println("Resetting LoRa Module ...");
-    pinMode(LORA_RESET, OUTPUT);
-    digitalWrite(LORA_RESET, LOW);
-    delay(10);
-    digitalWrite(LORA_RESET, HIGH);
-    delay(1000);          // Module needs this before it's ready on these boards (slow power up ?)
-    Serial.println("Reset LoRa Module");
-  #endif
-  pinMode(LORA_NSS, OUTPUT);
-  pinMode(LORA_DIO0, INPUT);
-
-  // SPI.begin();
-  SPI.begin(SCK,MISO,MOSI,LORA_NSS);
-  
+   
   // LoRa mode 
   setLoRaMode();
 
@@ -330,7 +311,6 @@ byte readRegister(byte addr)
   byte regval = SPI.transfer(0);
   unselect();
 
-  printf ("Reg %d = %02X\n", addr, regval);
   return regval;
 }
 
@@ -362,6 +342,53 @@ void unselect()
   digitalWrite(LORA_NSS, HIGH);
 }
 
+void DecryptMessage(char *Code, char *Message)
+{
+  int i, Len;
+  
+  Len = strlen(Code);
+  
+  if (Len > 0)
+  {
+    printf("Decoding ...\n");
+    i = 0;
+    while (*Message)
+    {
+      *Message = (*Message ^ Code[i]) & 0x7F;
+      Message++;
+      i = (i + 1) % Len;
+    }
+  }
+}
+
+char GetChar(char **Message)
+{
+  return *((*Message)++);
+}
+
+void GetString(char *Field, char **Message)
+{
+  while (**Message && (**Message != '/'))
+  {
+    *Field++ = *((*Message)++);
+  }
+  
+  *Field = 0;
+  if (**Message)
+  {
+    (*Message)++;
+  }
+}
+
+int32_t GetInteger(char **Message)
+{
+  char Temp[32];
+  
+  GetString(Temp, Message);
+  
+  return atoi(Temp);
+}
+
 void CheckLoRaRx(void)
 {
   if (LoRaMode == lmListening)
@@ -379,11 +406,26 @@ void CheckLoRaRx(void)
 					
       if (Bytes > 0)
       {
+        // Get RSSI etc
+        int8_t SNR;
+        int RSSI;
+        
+        SNR = readRegister(REG_PACKET_SNR);
+        SNR /= 4;
+        RSSI = readRegister(REG_PACKET_RSSI) - 157;
+        if (SNR < 0)
+        {
+          RSSI += SNR;
+        }
+        
+        GPS.LastPacketSNR = SNR;
+        GPS.LastPacketRSSI = RSSI;
+
         if (Sentence[0] == '$')
         {
           // ASCII telemetry
           Serial.println("Rx ASCII");
-          if (memcmp(Sentence+2, LORA_PAYLOAD_ID, strlen(LORA_PAYLOAD_ID)) != 0)
+          if (memcmp(Sentence+2, Settings.PayloadID, strlen(Settings.PayloadID)) != 0)
           {
             RepeatedPacketType = 3;
           }
@@ -395,13 +437,73 @@ void CheckLoRaRx(void)
             long Offset;
 
             Slot = (Sentence[LORA_TIME_INDEX+2] - '0') * LORA_TIME_MUTLIPLER + LORA_TIME_OFFSET;
-            Offset = (LORA_SLOT - Slot) * 1000L - LORA_PACKET_TIME;
-            if (Offset < 0) Offset += LORA_CYCLETIME * 1000L;
+            Offset = (Settings.LoRaSlot - Slot) * 1000L - LORA_PACKET_TIME;
+            if (Offset < 0) Offset += Settings.LoRaCycleTime * 1000L;
 
             Serial.print("Rx Slot = "); Serial.println(Slot);
             Serial.print(" Offset = "); Serial.println(Offset);
 
             TimeToSendIfNoGPS = millis() + Offset;
+          }
+        }
+        else if (Sentence[0] == '*')
+        {
+          char Command, Parameter, PayloadID[32], *Message;
+          
+          Message = (char *)(Sentence + 1);
+          
+          if (*Settings.UplinkCode)
+          {
+            // decode first
+            DecryptMessage(Settings.UplinkCode, Message);
+          }
+                   
+          Serial.printf("Uplink: %s\n", Sentence);
+
+          GetString(PayloadID, &Message);
+          
+          if (strcmp(PayloadID, Settings.PayloadID) == 0)
+          {
+            GPS.ReceivedCommandCount++;
+
+            strncpy(GPS.LastReceivedCommand, Message, sizeof(GPS.LastReceivedCommand));
+            
+            printf("Uplink message for us = '%s'\n", Message);
+            
+            Command = GetChar(&Message);
+            
+            #ifdef CUTDOWN
+            if (Command == 'C')
+            {
+              // Cutdown
+              Parameter = GetChar(&Message);
+            
+              if (Parameter == 'N')
+              {
+                int CutdownPeriod;
+                
+                // Cutdown Now
+                CutdownPeriod = GetInteger(&Message);
+                      
+                if (CutdownPeriod <= 0)
+                {
+                  CutdownPeriod = Settings.CutdownPeriod;
+                }
+                
+                Serial.printf("** MANUAL CUTDOWN FOR %d SECONDS **\n", CutdownPeriod);
+                
+                CutdownNow(CutdownPeriod * 1000);
+                
+                GPS.CutdownStatus = 3;      // Manually triggered
+              }
+              else if (Parameter == 'A')
+              {
+                // Cutdown at specified altitude
+                Serial.printf("Set cutdown altitude %sm\n", Message);
+                GPS.CutdownAltitude = GetInteger(&Message);
+              }
+            }
+            #endif
           }
         }
       }
@@ -415,13 +517,13 @@ int TimeToSend(void)
 	
   SendRepeatedPacket = 0;
 
-  if (LORA_CYCLETIME <= 0)
+  if (Settings.LoRaCycleTime <= 0)
   {
     // Not using time to decide when we can send
     return 1;
   }
 
-  if ((millis() > (LastLoRaTX + LORA_CYCLETIME*1000+2000)) && (TimeToSendIfNoGPS == 0))
+  if ((millis() > (LastLoRaTX + Settings.LoRaCycleTime*1000+2000)) && (TimeToSendIfNoGPS == 0))
   {
     // Timed out
     Serial.println("Using Timeout");
@@ -433,20 +535,20 @@ int TimeToSend(void)
     static int LastCycleSeconds=-1;
 
     // Can't Tx twice at the same time
-    CycleSeconds = (GPS.SecondsInDay+LORA_CYCLETIME-17) % LORA_CYCLETIME;   // Could just use GPS time, but it's nice to see the slot agree with UTC
+    CycleSeconds = (GPS.SecondsInDay+Settings.LoRaCycleTime) % Settings.LoRaCycleTime;   // Could just use GPS time, but it's nice to see the slot agree with UTC
     
     if (CycleSeconds != LastCycleSeconds)
     {
       LastCycleSeconds = CycleSeconds;
       
-      if (CycleSeconds == LORA_SLOT)
+      if (CycleSeconds == Settings.LoRaSlot)
       {
-        Serial.println("Using GPS Timing");
+        // Serial.println("Using GPS Timing");
         SendRepeatedPacket = 0;
         return 1;
       }
 
-      if (RepeatedPacketType && ((CycleSeconds == LORA_REPEAT_SLOT_1) || (CycleSeconds == LORA_REPEAT_SLOT_2)))
+      if (RepeatedPacketType && ((CycleSeconds == Settings.LoRaRepeatSlot1) || (CycleSeconds == Settings.LoRaRepeatSlot2)))
       {
         Serial.println("Time to repeat");
         SendRepeatedPacket = RepeatedPacketType;
@@ -490,13 +592,17 @@ int LoRaIsFree(void)
       return 1;
     }
     
-    if (LORA_CYCLETIME > 0)
+    if (Settings.LoRaCycleTime > 0)
     {
       // TDM system and not time to send, so we can listen
+#ifdef LORA_DONT_LISTEN
+      lora_sleep();
+#else
       if (LoRaMode == lmIdle)
       {
         startReceiving();
       }
+#endif      
     }
   }
   
@@ -512,7 +618,7 @@ void SendLoRaPacket(unsigned char *buffer, int Length)
 
   if (InRTTYMode != 0)
   {
-    setupRFM98(LORA_FREQUENCY, LORA_MODE);
+    setupRFM98(Settings.LoRaFrequency, Settings.LoRaMode);
     InRTTYMode = 0;
   }
   
@@ -556,6 +662,19 @@ void startReceiving(void)
   setMode(RF98_MODE_RX_CONTINUOUS); 
 		
   LoRaMode = lmListening;
+}
+
+void lora_sleep(void)
+{
+  // writeRegister(REG_DIO_MAPPING_1, 0x00);    // 00 00 00 00 maps DIO0 to RxDone
+  
+  // writeRegister(REG_FIFO_RX_BASE_AD, 0);
+  // writeRegister(REG_FIFO_ADDR_PTR, 0);
+    
+  // Setup Receive Continuous Mode
+  setMode(RF98_MODE_SLEEP); 
+    
+  LoRaMode = lmIdle;
 }
 
 int receiveMessage(unsigned char *message, int MaxLength)
@@ -604,7 +723,7 @@ int BuildLoRaPositionPacket(unsigned char *TxLine)
 
   SentenceCounter++;
 
-  BinaryPacket.PayloadIDs = 0xC0 | (LORA_ID << 3) | LORA_ID;
+  BinaryPacket.PayloadIDs = 0xC0 | (Settings.BinaryNode << 3) | Settings.BinaryNode;
   BinaryPacket.Counter = SentenceCounter;
   BinaryPacket.BiSeconds = GPS.SecondsInDay / 2L;
   BinaryPacket.Latitude = GPS.Latitude;
@@ -730,7 +849,7 @@ void SwitchToFSKMode(void)
   writeRegister(REG_PA_CONFIG, PA_MAX_UK);
     
   // Frequency
-  FrequencyValue = (unsigned long)((LORA_RTTY_FREQ + (LORA_OFFSET / 1000.0)) * 7110656 / 434);
+  FrequencyValue = (unsigned long)((Settings.RTTYFrequency + (LORA_OFFSET / 1000.0)) * 7110656 / 434);
   writeRegister(REG_FRF_MSB, (FrequencyValue >> 16) & 0xFF);   // Set frequency
   writeRegister(REG_FRF_MID, (FrequencyValue >> 8) & 0xFF);
   writeRegister(REG_FRF_LSB, FrequencyValue & 0xFF);
@@ -738,7 +857,7 @@ void SwitchToFSKMode(void)
   //write modem config
   writeRegister(REG_BITRATE_LSB, FSKBitRate & 0xFF);
   writeRegister(REG_BITRATE_MSB, (FSKBitRate >> 8) & 0xFF);
-  writeRegister(REG_FDEV_LSB, (LORA_RTTY_SHIFT / 122) & 0xFF);
+  writeRegister(REG_FDEV_LSB, (Settings.RTTYAudioShift / 122) & 0xFF);
   writeRegister(REG_FDEV_MSB, 0);
   writeRegister(REG_PREAMBLE_LSB_FSK, 0);    // Preamble
   writeRegister(REG_PREAMBLE_MSB_FSK, 0);
@@ -761,7 +880,7 @@ void SendLoRaRTTY(int Length)
   // memcpy(RTTYBuffer, buffer, Length);
   RTTYLength = Length;
   RTTYIndex = 0;
-  RTTYMask = -LORA_RTTY_PREAMBLE;
+  RTTYMask = -Settings.RTTYPreamble;
   
   // Set FIFO threshold
   uint8_t r = readRegister(REG_FIFO_THRESH); 
@@ -780,12 +899,15 @@ void SendLoRaRTTY(int Length)
 void CheckLoRa(void)
 {
   CheckFSKBuffer();
-  
-  CheckLoRaRx();
+
+  if (Settings.EnableUplink)
+  {
+    CheckLoRaRx();
+  }
 		
   if (LoRaIsFree())
   {		
-    Serial.println("LoRa is free");
+    // Serial.println("LoRa is free");
     if (SendRepeatedPacket == 3)
     {
       // Repeat ASCII sentence
@@ -819,45 +941,57 @@ void CheckLoRa(void)
     {
       int PacketLength;
 
-      if (++RTTYCount >= (LORA_RTTY_COUNT + LORA_RTTY_EVERY))
+      if (++RTTYCount >= (Settings.RTTYCount + Settings.RTTYEvery))
       {
         RTTYCount = 0;
       }
             
-      if (RTTYCount < LORA_RTTY_COUNT)
+      if (RTTYCount < Settings.RTTYCount)
       {
         // Send RTTY packet
-        PacketLength = BuildSentence((char *)Sentence, LORA_PAYLOAD_ID);
-        Serial.println(F("LoRa: Tx RTTY packet"));
+        PacketLength = BuildSentence((char *)Sentence);
+        Serial.printf("RTTY=%s", Sentence);
         SendLoRaRTTY(PacketLength);    
+        #ifdef OLED
+          ShowTxStatus("RTTY", SentenceCounter);
+        #endif
       }
       else
       {
-        if ((LORA_CALL_COUNT > 0) && (++CallingCount > LORA_CALL_COUNT))
+        if ((Settings.CallingCount > 0) && (++CallingCount > Settings.CallingCount))
   	    {
   		    CallingCount = 0;
   		    setupRFM98(LORA_CALL_FREQ, LORA_CALL_MODE);
           PacketLength = BuildLoRaCall(Sentence);
   		    Serial.println(F("LoRa: Calling Mode"));
+          #ifdef OLED
+            ShowTxStatus("CALL MODE", 0);
+          #endif
   	    }
         else
   	    {
-  		    if ((LORA_CALL_COUNT > 0) && (CallingCount == 1))
+  		    if ((Settings.CallingCount > 0) && (CallingCount == 1))
   		    {
-  			    setupRFM98(LORA_FREQUENCY, LORA_MODE);
+  			    setupRFM98(Settings.LoRaFrequency, Settings.LoRaMode);
   		    }
   		
-  	      if (LORA_BINARY)
+  	      if (Settings.UseBinaryMode)
           {
             // 0x80 | (LORA_ID << 3) | TargetID
             PacketLength = BuildLoRaPositionPacket(Sentence);
   		      Serial.println(F("LoRa: Tx Binary packet"));
+            #ifdef OLED
+              ShowTxStatus("Binary", SentenceCounter);
+            #endif
           }
           else
           {
-            PacketLength = BuildSentence((char *)Sentence, LORA_PAYLOAD_ID);
-  	        Serial.println(F("LoRa: Tx ASCII Sentence"));
-            Serial.print((char *)Sentence);
+            PacketLength = BuildSentence((char *)Sentence);
+            Serial.printf("LORA=%s", Sentence);
+            // Serial.print((char *)Sentence);
+            #ifdef OLED
+              ShowTxStatus("LoRa", SentenceCounter);  
+            #endif
   		    }
         }
   							
@@ -866,5 +1000,3 @@ void CheckLoRa(void)
     }
   }
 }
-
-#endif

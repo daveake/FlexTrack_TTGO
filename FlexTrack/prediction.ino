@@ -1,14 +1,3 @@
-// #include <stdio.h>
-// #include <stdlib.h>
-// #include <string.h>
-// #include <unistd.h>
-// #include <errno.h>
-// #include <math.h>
-// #include <inttypes.h>
-
-// #include "gps.h"
-// #include "misc.h"
-
 #define DEG2RAD (3.142 / 180)
 #define SLOTSIZE 100
 #define SLOTS 45000 / SLOTSIZE
@@ -89,7 +78,7 @@ void SetupPrediction(void)
   PreviousLongitude = 0;
   PreviousAltitude = 0;
   
-  GPS.CDA = INITIAL_CDA;
+  GPS.CDA = Settings.CDA;
 }
 
 void CheckPrediction(void)
@@ -102,7 +91,7 @@ void CheckPrediction(void)
     
     NextCheck = millis() + POLL_PERIOD * 1000;
 
-    Serial.printf("FLIGHT MODE = %d ***\n", GPS.FlightMode);
+    // Serial.printf("FLIGHT MODE = %d ***\n", GPS.FlightMode);
     
     if ((GPS.FlightMode >= fmLaunched) && (GPS.FlightMode < fmLanded))
     {
@@ -121,16 +110,16 @@ void CheckPrediction(void)
       {
         // Coming down - try and calculate how well chute is doing
         
-        GPS.CDA = (GPS.CDA*4 + CalculateCDA(PAYLOAD_WEIGHT, GPS.Altitude/2 + PreviousAltitude/2, (PreviousAltitude - GPS.Altitude) / POLL_PERIOD)) / 5;
+        GPS.CDA = (GPS.CDA*4 + CalculateCDA(Settings.PayloadWeight, GPS.Altitude/2 + PreviousAltitude/2, (PreviousAltitude - GPS.Altitude) / POLL_PERIOD)) / 5;
       }
 
       // Estimate landing position
       GPS.TimeTillLanding = CalculateLandingPosition(GPS.Latitude, GPS.Longitude, GPS.Altitude, &(GPS.PredictedLatitude), &(GPS.PredictedLongitude));
       
-      GPS.PredictedLandingSpeed = CalculateDescentRate(PAYLOAD_WEIGHT, GPS.CDA, LANDING_ALTITUDE);
+      GPS.PredictedLandingSpeed = CalculateDescentRate(Settings.PayloadWeight, GPS.CDA, Settings.LandingAltitude);
       
       Serial.printf("Expected Descent Rate = %4.1f (now) %3.1f (landing), time till landing %d\n", 
-                    CalculateDescentRate(PAYLOAD_WEIGHT, GPS.CDA, GPS.Altitude),
+                    CalculateDescentRate(Settings.PayloadWeight, GPS.CDA, GPS.Altitude),
                     GPS.PredictedLandingSpeed, GPS.TimeTillLanding);
       
       Serial.printf("Current    %f, %f, alt %" PRId32 "\n", GPS.Latitude, GPS.Longitude, GPS.Altitude);
@@ -154,16 +143,16 @@ int CalculateLandingPosition(float Latitude, float Longitude, int32_t Altitude, 
   Slot = GetSlot(Altitude);
   DistanceInSlot = Altitude + 1 - (Slot * SLOTSIZE);
   
-  while (Altitude > LANDING_ALTITUDE)
+  while (Altitude > Settings.LandingAltitude)
   {
     Slot = GetSlot(Altitude);
     
-    if (Slot == GetSlot(LANDING_ALTITUDE))
+    if (Slot == GetSlot(Settings.LandingAltitude))
     {
-      DistanceInSlot = Altitude - LANDING_ALTITUDE;
+      DistanceInSlot = Altitude - Settings.LandingAltitude;
     }
     
-    DescentRate = CalculateDescentRate(PAYLOAD_WEIGHT, GPS.CDA, Altitude);
+    DescentRate = CalculateDescentRate(Settings.PayloadWeight, GPS.CDA, Altitude);
     TimeInSlot = DistanceInSlot / DescentRate;
     
     Latitude += Positions[Slot].LatitudeDelta * TimeInSlot;

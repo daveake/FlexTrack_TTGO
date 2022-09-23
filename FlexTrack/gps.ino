@@ -70,39 +70,6 @@ void SetFlightMode(byte NewMode)
   SendUBX(setNav, sizeof(setNav));
 }
 
-    
-#ifdef POWERSAVING
-void SetGNSSMode(void)
- {
-  // Sets CFG-GNSS to disable everything other than GPS GNSS
-  // solution. Failure to do this means GPS power saving 
-  // doesn't work. Not needed for MAX7, needed for MAX8's
-  
-  uint8_t setGNSS[] = {
-    0xB5, 0x62, 0x06, 0x3E, 0x2C, 0x00, 0x00, 0x00,
-    0x20, 0x05, 0x00, 0x08, 0x10, 0x00, 0x01, 0x00,
-    0x01, 0x01, 0x01, 0x01, 0x03, 0x00, 0x00, 0x00,
-    0x01, 0x01, 0x03, 0x08, 0x10, 0x00, 0x00, 0x00,
-    0x01, 0x01, 0x05, 0x00, 0x03, 0x00, 0x00, 0x00,
-    0x01, 0x01, 0x06, 0x08, 0x0E, 0x00, 0x00, 0x00,
-    0x01, 0x01, 0xFC, 0x11};
-    SendUBX(setGNSS, sizeof(setGNSS));
-} 
-#endif
-
-#ifdef POWERSAVING
-void SetPowerMode(byte SavePower)
-{
-  uint8_t setPSM[] = {0xB5, 0x62, 0x06, 0x11, 0x02, 0x00, 0x08, 0x01, 0x22, 0x92 };
-  
-  setPSM[7] = SavePower ? 1 : 0;
-  
-  FixUBXChecksum(setPSM, sizeof(setPSM));
-  
-  SendUBX(setPSM, sizeof(setPSM));
-}
-#endif
-
 void SetupGPS(void)
 {
   // Switch GPS on, if we have control of that
@@ -148,7 +115,7 @@ void ProcessNMEA(char *Buffer, int Count)
   char ns, ew;
   char TimeString[16], LatString[16], LongString[16], Temp[4];
 
-  Serial.print(Buffer);
+  // Serial.print(Buffer);
 
   if (GPSChecksumOK(Buffer, Count))
   {
@@ -214,16 +181,35 @@ void ProcessNMEA(char *Buffer, int Count)
         }
         
         // Landed?
-        if ((GPS.AscentRate >= -0.1) && (GPS.Altitude <= LANDING_ALTITUDE+2000) && (GPS.FlightMode >= fmDescending) && (GPS.FlightMode < fmLanded))
+        if ((GPS.AscentRate >= -0.1) && (GPS.Altitude <= Settings.LandingAltitude+2000) && (GPS.FlightMode >= fmDescending) && (GPS.FlightMode < fmLanded))
         {
           GPS.FlightMode = fmLanded;
           Serial.printf("*** LANDED ***\n");
         }        
+
+        #ifdef OLED
+          ShowGPSStatus();
+        #endif
       }
       
-      Serial.print(GPS.Hours); Serial.print(":"); Serial.print(GPS.Minutes); Serial.print(":"); Serial.print(GPS.Seconds);Serial.print(" - ");
-      Serial.print(GPS.Latitude, 6); Serial.print(',');Serial.print(GPS.Longitude, 6);Serial.print(',');Serial.print(GPS.Altitude);Serial.print(',');
-      Serial.println(GPS.Satellites);
+      // Serial.print(GPS.Hours); Serial.print(":"); Serial.print(GPS.Minutes); Serial.print(":"); Serial.print(GPS.Seconds);Serial.print(" - ");
+      // Serial.print(GPS.Latitude, 6); Serial.print(',');Serial.print(GPS.Longitude, 6);Serial.print(',');Serial.print(GPS.Altitude);Serial.print(',');
+      // Serial.println(GPS.Satellites);
+    }
+    else if (strncmp((char *)Buffer+3, "RMC", 3) == 0)
+    {
+      float Speed, Direction;
+      
+      // Serial.print(Buffer+1);
+      // GPRMC,154036.00,A,5157.00573,N,00232.66685,W,0.210,,160322,,,A*6F   
+
+      Direction = 0;
+      if (sscanf(Buffer+7, "%*[^,],%*[^,],%*[^,],%*[^,],%*[^,],%*[^,],%f,%f", &Speed, &Direction) >= 1)
+      { 
+        GPS.Speed = Speed;
+        GPS.Direction = Direction;
+        // Serial.printf("%f %f\n", Speed, Direction);
+      }
     }
     else if (strncmp((char *)Buffer+3, "GSV", 3) == 0)
     {
@@ -241,10 +227,6 @@ void ProcessNMEA(char *Buffer, int Count)
     {
       DisableNMEAProtocol(5);
     }
-    else if (strncmp((char *)Buffer+3, "RMC", 3) == 0)
-    {
-      DisableNMEAProtocol(4);
-    }
   }
   else
   {
@@ -254,7 +236,6 @@ void ProcessNMEA(char *Buffer, int Count)
 
   
 void CheckGPS(void)
-{
 {
   static unsigned long ModeTime=0;
   static char Line[128];
@@ -288,7 +269,8 @@ void CheckGPS(void)
 
   if (millis() >= ModeTime)
   {
-    RequiredFlightMode = (GPS.Altitude > 1000) ? 6 : 3;    // 6 is airborne <1g mode; 3=Pedestrian mode
+    RequiredFlightMode = (GPS.Altitude > Settings.FlightModeAltitude) ? 6 : 3;    // 6 is airborne <1g mode; 3=Pedestrian mode
+    
     if (RequiredFlightMode != GPS.GPSFlightMode)
     {
       GPS.GPSFlightMode = RequiredFlightMode;
@@ -299,4 +281,4 @@ void CheckGPS(void)
     
     ModeTime = millis() + 60000;
   }
-}}
+}

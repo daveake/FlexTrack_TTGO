@@ -1,19 +1,58 @@
 #ifdef CUTDOWN
 
+unsigned long CutdownOffAt=0;
+
+#ifdef SERVO_PIN
+  Servo myservo;
+#endif
+
+
 void SetupCutdown(void)
 {
-    digitalWrite(CUTDOWN, 0);
+  #ifdef CUTDOWN_PIN
+    digitalWrite(CUTDOWN_PIN, 0);
     pinMode(CUTDOWN, OUTPUT);
     digitalWrite(CUTDOWN, 0);
+  #endif
+
+#ifdef SERVO_PIN
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+  myservo.setPeriodHertz(50);    // standard 50 hz servo
+  myservo.attach(SERVO_PIN, 1000, 2000); // attaches the servo on pin 18 to the servo object
+  myservo.write(180);
+#endif
 }
 
-void CutdownNow(void)
+void CutdownNow(unsigned long Period)
 {
   Serial.println("CUTDOWN ON");
-  digitalWrite(CUTDOWN, 1);
-  delay(5000);
-  digitalWrite(CUTDOWN, 0);
+
+  #ifdef CUTDOWN_PIN
+    digitalWrite(CUTDOWN, 1);
+  #endif
+
+#ifdef SERVO_PIN
+  myservo.write(0);
+#endif
+  
+  CutdownOffAt = millis() + Period;
+}
+
+void CutdownOff(void)
+{
   Serial.println("CUTDOWN OFF");
+  #ifdef CUTDOWN_PIN
+    digitalWrite(CUTDOWN, 0);
+  #endif
+
+//#ifdef SERVO_PIN
+//  myservo.write(180);
+//#endif
+
+  CutdownOffAt = 0;
 }
 
 void CheckCutdown(void)
@@ -31,26 +70,18 @@ void CheckCutdown(void)
     // Trigger only if armed
     if (GPS.CutdownStatus == 1)
     {
-      // Uncomment/modify the following code to trigger the cutdown appropriately for your flight
-    
       // ALTITUDE TEST
-      /*
-      if (GPS.Altitude > 12000)
+      if ((GPS.CutdownAltitude > 2000) && (GPS.Altitude > GPS.CutdownAltitude))
       {
         GPS.CutdownStatus = 2;      // Altitude trigger
-        CutdownNow();
+        CutdownNow(GPS.CutdownPeriod);
       }
-      */
-    
-      // LONGITUDE TEST
-      /*
-      if ((GPS.Longitude < -6.5)
-      {
-        GPS.CutdownStatus = 3;      // Longitude trigger
-        CutdownNow();
-      }
-      */
     }
+  }
+
+  if ((CutdownOffAt > 0) && (millis() >= CutdownOffAt))
+  {
+    CutdownOff();
   }
 }
 

@@ -1,4 +1,5 @@
 
+#ifdef WIREBUS
 #define PARASITE_POWER  false
 #define OW_PIN          4
 #define PARASITE_POWER  false
@@ -49,7 +50,6 @@ void Setupds18b20(void)
 
 void Checkds18b20(void)
 {
-#ifdef WIREBUS
   if (millis() >= CheckDS18B20)
   {
     DSTherm drv(_ow);
@@ -70,5 +70,6 @@ void Checkds18b20(void)
 
     CheckDS18B20 = millis() + 10000L;
   }
-#endif  
 }
+
+#endif  

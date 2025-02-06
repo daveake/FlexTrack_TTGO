@@ -100,6 +100,11 @@ int BuildSentence(char *TxLine)
 //    {
 //      sprintf(Temp, "%u", GPS.ExtraFields[Field-'I']);
 //    }
+    else if (Field == 'O')
+    {
+      // Max Altitude
+      sprintf(Temp, "%ld", GPS.MaximumAltitude);
+    }
 
     if (i > 0)
     {

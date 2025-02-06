@@ -2,7 +2,9 @@
 
 Flexible Arduino-based tracker software for RTTY, LoRa and APRS.
 
-This fork is configured for Habduino V4.X boards. 
+This repository is specifically for the TTGO T-Beam which has ESP32, UBlox NEO-6M and LoRa transceiver          |
+
+Compared with usual AVR FlexTrack, it has landing prediction, OLED support and EEPROM configuration.
 
 This code provides simultaneous (where legal and supported by the hardware installed) transmission of radio telemetry via RTTY and APRS on Habduino Arduino addon boards for High Altitude Ballooning.
 

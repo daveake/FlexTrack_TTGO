@@ -13,13 +13,13 @@
 // #define LORA_DONT_LISTEN                  // Saves power
 
 // Optional devices - uncomment if present
-#define OLED                                // Enable OLED
-#define WIREBUS 4
+// #define OLED                                // Enable OLED
+// #define WIREBUS 4
 // #define BMP085         // Also works with BMP180
 // #define BNO085
 
 // Options
-#define SERVO_PIN                15      // Cutdown via a servo motor
+// #define SERVO_PIN                15      // Cutdown via a servo motor
 // #define CUTDOWN_PIN             25      // This pin made active to cut down from balloon
 // #define ENABLE_UPLINK               // Enables uplink, for which you need to set TDM mode for transmission/reception
 
@@ -29,14 +29,14 @@
 
 // PRODUCT INFO
 
-#define   VERSION     "V1.22"
+#define   VERSION     "V1.23"
 #define   PRODUCT     "FlexTrack"
 #define   DESCRIPTION "TTGO T-Beam ESP32"
 
 // FIXED CONFIG
 
 #define SIG_1   'D'
-#define SIG_2   'A'
+#define SIG_2   'B'
 
 #define LORA_TIME_INDEX      2
 #define LORA_TIME_MUTLIPLER  2
@@ -430,7 +430,9 @@ void ProcessCommand(char *Line)
   }
   else if (Line[0] == 'X')
   {
-    CutdownNow(5000);
+    #ifdef CUTDOWN
+      CutdownNow(5000);
+    #endif
   }
 
   if (OK)
